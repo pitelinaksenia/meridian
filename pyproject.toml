@@ -6,4 +6,32 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "django>=6.1.1",
+    "django-cors-headers>=4.9.0",
+    "django-environ>=0.14.0",
+    "django-filter>=26.1",
+    "django-storages[s3]>=1.14.6",
+    "djangorestframework>=3.18.1",
+    "drf-spectacular>=0.30.0",
+    "pillow>=12.3.0",
 ]
+
+[dependency-groups]
+dev = [
+    "django-debug-toolbar>=8.0.0",
+    "ruff>=0.16.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+
+[tool.ruff.lint.per-file-ignores]
+"config/settings/dev.py" = ["F403", "F405"]
+"config/settings/prod.py" = ["F403", "F405"]
