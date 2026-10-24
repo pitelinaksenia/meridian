@@ -2,10 +2,13 @@
 
 import html
 import logging
+import os
 import re
 import shutil
 import tempfile
 from pathlib import PurePosixPath
+
+from .pdf import optimize_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +61,36 @@ def pdf_text(stream) -> str:
     return "\n".join(parts)
 
 
-def extract_text(field_file) -> str:
-    """Text of a FileField value; empty for audio, epub, docx and unreadable files."""
+CHUNK = 1024 * 1024
+
+
+def _pdf_text_and_repack(field_file, f, repack: bool) -> str:
+    """Text of the PDF in `f`; with `repack`, also replaces the stored file by a repacked one."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # a 200 MB scan must not sit in memory: copy it to disk in chunks
+        src = os.path.join(tmp, "src.pdf")
+        with open(src, "wb") as out:
+            shutil.copyfileobj(f, out, CHUNK)
+        path = src
+        if repack:
+            dst = os.path.join(tmp, "dst.pdf")
+            if optimize_pdf(src, dst):
+                # same name, so the URL does not change; S3 replaces the object atomically
+                with (
+                    open(dst, "rb") as data,
+                    field_file.storage.open(field_file.name, "wb") as target,
+                ):
+                    shutil.copyfileobj(data, target, CHUNK)
+                path = dst
+        with open(path, "rb") as pdf:
+            return pdf_text(pdf)
+
+
+def extract_text(field_file, repack_pdf: bool = False) -> str:
+    """
+    Text of a FileField value; empty for audio, epub, docx and unreadable files.
+    With `repack_pdf`, a PDF is first repacked in storage for the site reader (see pdf.py).
+    """
     if not field_file:
         return ""
     ext = PurePosixPath(field_file.name).suffix.lower().lstrip(".")
@@ -68,11 +99,7 @@ def extract_text(field_file) -> str:
     try:
         with field_file.open("rb") as f:
             if ext in PDF_EXT:
-                # a 200 MB scan must not sit in memory: copy it to disk in chunks
-                with tempfile.TemporaryFile() as tmp:
-                    shutil.copyfileobj(f, tmp, 1024 * 1024)
-                    tmp.seek(0)
-                    text = pdf_text(tmp)
+                text = _pdf_text_and_repack(field_file, f, repack_pdf)
             else:
                 data = f.read(MAX_PLAIN_BYTES)
                 if len(data) == MAX_PLAIN_BYTES:

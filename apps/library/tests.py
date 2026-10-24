@@ -121,6 +121,21 @@ class TextExtractionTest(TestCase):
     def test_pdf(self):
         self.assertIn("Omsk airport", self.book("d.pdf", make_pdf("Omsk airport")).text)
 
+    def test_new_pdf_is_repacked_for_page_by_page_loading(self):
+        book = self.book("scan.pdf", make_pdf("Omsk airport"))
+        with book.file.open("rb") as f:
+            data = f.read()
+        # page dictionaries are now inside an object stream, not spread over the file
+        self.assertIn(b"/ObjStm", data)
+        self.assertNotIn(b"/MediaBox", data)
+        self.assertIn("Omsk airport", book.text)
+
+    def test_broken_pdf_is_kept_as_is(self):
+        book = self.book("broken.pdf", b"%PDF-1.4 not really a pdf")
+        with book.file.open("rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 not really a pdf")
+        self.assertEqual(book.text, "")
+
     def test_audio_has_no_text(self):
         self.assertEqual(self.book("e.mp3", b"ID3...").text, "")
 

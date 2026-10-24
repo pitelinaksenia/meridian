@@ -13,6 +13,7 @@ dependencies = [
     "djangorestframework>=3.18.1",
     "drf-spectacular>=0.30.0",
     "gunicorn>=26.2.0",
+    "pikepdf>=10.17.0",
     "pillow>=12.3.0",
     "psycopg[binary]>=3.3.5",
     "pypdf>=6.21.2",

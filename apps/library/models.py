@@ -44,7 +44,8 @@ class SearchTextMixin(models.Model):
         super().save(*args, **kwargs)
         # after super().save() the upload is already in storage
         if changed:
-            self.schedule_text_refresh()
+            # a new PDF is repacked once, for page-by-page loading on the site
+            self.schedule_text_refresh(repack_pdf=True)
 
     def _file_changed(self) -> bool:
         if self.pk is None:
@@ -58,14 +59,14 @@ class SearchTextMixin(models.Model):
         except OSError:
             return False
 
-    def refresh_text(self):
-        self.text = extract_text(self.file)
+    def refresh_text(self, repack_pdf: bool = False):
+        self.text = extract_text(self.file, repack_pdf=repack_pdf)
         type(self).objects.filter(pk=self.pk).update(text=self.text)
 
-    def schedule_text_refresh(self) -> bool:
+    def schedule_text_refresh(self, repack_pdf: bool = False) -> bool:
         """Extract now, or for a big file in the background after commit. True if deferred."""
         if not self._is_big_file():
-            self.refresh_text()
+            self.refresh_text(repack_pdf)
             return False
         # the old text belongs to the old file: search must not find it meanwhile
         self.text = ""
@@ -75,7 +76,7 @@ class SearchTextMixin(models.Model):
         def job():
             item = model.objects.filter(pk=pk).first()
             if item is not None:
-                item.refresh_text()
+                item.refresh_text(repack_pdf)
 
         transaction.on_commit(lambda: run_in_background(job))
         return True
