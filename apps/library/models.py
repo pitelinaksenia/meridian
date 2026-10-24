@@ -1,6 +1,29 @@
-from django.db import models
+import logging
+import threading
+
+from django.db import connection, models, transaction
 
 from .text import extract_text
+
+logger = logging.getLogger(__name__)
+
+# Text of a bigger file is extracted in the background: for a 200 MB PDF it takes
+# minutes, and the gateway would answer the admin with 504 long before that
+INLINE_TEXT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def run_in_background(job):
+    """A daemon thread with its own DB connection. Tests replace it to run the job inline."""
+
+    def target():
+        try:
+            job()
+        except Exception:
+            logger.exception("Background text extraction failed")
+        finally:
+            connection.close()
+
+    threading.Thread(target=target, daemon=True).start()
 
 
 class SearchTextMixin(models.Model):
@@ -10,7 +33,7 @@ class SearchTextMixin(models.Model):
         "текст для поиска",
         blank=True,
         editable=False,
-        help_text="Извлекается из файла при сохранении.",
+        help_text="Извлекается из файла при сохранении; у больших файлов — в фоне.",
     )
 
     class Meta:
@@ -21,7 +44,7 @@ class SearchTextMixin(models.Model):
         super().save(*args, **kwargs)
         # after super().save() the upload is already in storage
         if changed:
-            self.refresh_text()
+            self.schedule_text_refresh()
 
     def _file_changed(self) -> bool:
         if self.pk is None:
@@ -29,9 +52,33 @@ class SearchTextMixin(models.Model):
         old = type(self).objects.filter(pk=self.pk).values_list("file", flat=True).first()
         return (old or "") != (self.file.name or "")
 
+    def _is_big_file(self) -> bool:
+        try:
+            return bool(self.file) and self.file.size > INLINE_TEXT_MAX_BYTES
+        except OSError:
+            return False
+
     def refresh_text(self):
         self.text = extract_text(self.file)
         type(self).objects.filter(pk=self.pk).update(text=self.text)
+
+    def schedule_text_refresh(self) -> bool:
+        """Extract now, or for a big file in the background after commit. True if deferred."""
+        if not self._is_big_file():
+            self.refresh_text()
+            return False
+        # the old text belongs to the old file: search must not find it meanwhile
+        self.text = ""
+        type(self).objects.filter(pk=self.pk).update(text="")
+        model, pk = type(self), self.pk
+
+        def job():
+            item = model.objects.filter(pk=pk).first()
+            if item is not None:
+                item.refresh_text()
+
+        transaction.on_commit(lambda: run_in_background(job))
+        return True
 
 
 class Collection(SearchTextMixin):

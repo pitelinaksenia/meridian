@@ -12,17 +12,24 @@ ACTION_TIME_BUDGET = 20
 def refresh_search_text(modeladmin, request, queryset):
     """Re-reads the files. Texts of new uploads are extracted on save, this is for old ones."""
     started = time.monotonic()
-    done, empty = 0, []
+    done, background, empty = 0, 0, []
     # those without text first: running the action again on everything continues from them
     items = sorted(queryset, key=lambda item: bool(item.text))
     for item in items:
         if time.monotonic() - started > ACTION_TIME_BUDGET:
             break
-        item.refresh_text()
         done += 1
-        if item.file and not item.text:
+        if item.schedule_text_refresh():
+            background += 1
+        elif item.file and not item.text:
             empty.append(str(item))
-    modeladmin.message_user(request, f"Текст обновлён: {done}.")
+    modeladmin.message_user(request, f"Текст обновлён: {done - background}.")
+    if background:
+        modeladmin.message_user(
+            request,
+            f"Больших файлов: {background} — их текст извлекается в фоне, "
+            "в поиске он появится через несколько минут.",
+        )
     if done < len(items):
         modeladmin.message_user(
             request,

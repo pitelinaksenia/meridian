@@ -13,11 +13,11 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='book',
             name='text',
-            field=models.TextField(blank=True, editable=False, help_text='Извлекается из файла при сохранении.', verbose_name='текст для поиска'),
+            field=models.TextField(blank=True, editable=False, help_text='Извлекается из файла при сохранении; у больших файлов — в фоне.', verbose_name='текст для поиска'),
         ),
         migrations.AddField(
             model_name='collection',
             name='text',
-            field=models.TextField(blank=True, editable=False, help_text='Извлекается из файла при сохранении.', verbose_name='текст для поиска'),
+            field=models.TextField(blank=True, editable=False, help_text='Извлекается из файла при сохранении; у больших файлов — в фоне.', verbose_name='текст для поиска'),
         ),
     ]

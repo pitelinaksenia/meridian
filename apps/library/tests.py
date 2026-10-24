@@ -137,6 +137,30 @@ class TextExtractionTest(TestCase):
         book.refresh_from_db()
         self.assertEqual(book.text, "второй")
 
+    def test_big_file_text_is_extracted_in_background_after_commit(self):
+        with (
+            mock.patch("apps.library.models.INLINE_TEXT_MAX_BYTES", 5),
+            mock.patch("apps.library.models.run_in_background", lambda job: job()),
+        ):
+            with self.captureOnCommitCallbacks() as callbacks:
+                book = self.book("big.txt", "большой файл".encode())
+            # the save returns at once, without the text
+            self.assertEqual(Book.objects.get(pk=book.pk).text, "")
+            for callback in callbacks:
+                callback()
+        self.assertEqual(Book.objects.get(pk=book.pk).text, "большой файл")
+
+    def test_long_plain_file_is_cut_at_a_line_break(self):
+        data = "строка\n".encode() * 10
+        with mock.patch("apps.library.text.MAX_PLAIN_BYTES", len(data) - 3):
+            text = self.book("long.txt", data).text
+        # not mistaken for Windows-1251 because of a half of a character
+        self.assertEqual(text.split(), ["строка"] * 9)
+
+    def test_pdf_text_is_capped(self):
+        with mock.patch("apps.library.text.MAX_TEXT_CHARS", 5):
+            self.assertEqual(self.book("cap.pdf", make_pdf("Omsk airport")).text, "Omsk ")
+
     def test_admin_action_continues_where_it_stopped(self):
         books = [self.book(f"{i}.txt", f"текст {i}".encode()) for i in range(3)]
         Book.objects.update(text="")
