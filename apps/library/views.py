@@ -1,9 +1,20 @@
 import django_filters
 from django.db.models import Count, Prefetch, Q
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import generics
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from config.search import full_text_search
 
 from .models import Book, Collection
-from .serializers import BookSerializer, CollectionDetailSerializer, CollectionSerializer
+from .serializers import (
+    BookSearchSerializer,
+    BookSerializer,
+    CollectionDetailSerializer,
+    CollectionSearchSerializer,
+    CollectionSerializer,
+)
 
 published_books = Book.objects.filter(status=Book.Status.PUBLISHED)
 
@@ -56,3 +67,41 @@ class CollectionDetailView(generics.RetrieveAPIView):
     )
     serializer_class = CollectionDetailSerializer
     lookup_field = "slug"
+
+
+SEARCH_WEIGHTS = {"title": "A", "description": "B", "text": "C"}
+SEARCH_HEADLINE = ("text", "description")
+
+
+class LibrarySearchView(APIView):
+    """Full-text search in published books and collections, best matches first."""
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "q", str, required=True, description='Query: words, "a phrase", -exclude'
+            )
+        ],
+        responses=inline_serializer(
+            "LibrarySearchResult",
+            {
+                "books": BookSearchSerializer(many=True),
+                "collections": CollectionSearchSerializer(many=True),
+            },
+        ),
+    )
+    def get(self, request):
+        q = request.query_params.get("q", "")
+        books = full_text_search(
+            published_books.select_related("collection"), q, SEARCH_WEIGHTS, SEARCH_HEADLINE
+        )
+        collections = full_text_search(published_collections, q, SEARCH_WEIGHTS, SEARCH_HEADLINE)
+        context = {"request": request}
+        return Response(
+            {
+                "books": BookSearchSerializer(books, many=True, context=context).data,
+                "collections": CollectionSearchSerializer(
+                    collections, many=True, context=context
+                ).data,
+            }
+        )

@@ -1,7 +1,40 @@
 from django.db import models
 
+from .text import extract_text
 
-class Collection(models.Model):
+
+class SearchTextMixin(models.Model):
+    """Keeps `text` — the plain text of `file` — for full-text search."""
+
+    text = models.TextField(
+        "текст для поиска",
+        blank=True,
+        editable=False,
+        help_text="Извлекается из файла при сохранении.",
+    )
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        changed = self._file_changed()
+        super().save(*args, **kwargs)
+        # after super().save() the upload is already in storage
+        if changed:
+            self.refresh_text()
+
+    def _file_changed(self) -> bool:
+        if self.pk is None:
+            return bool(self.file)
+        old = type(self).objects.filter(pk=self.pk).values_list("file", flat=True).first()
+        return (old or "") != (self.file.name or "")
+
+    def refresh_text(self):
+        self.text = extract_text(self.file)
+        type(self).objects.filter(pk=self.pk).update(text=self.text)
+
+
+class Collection(SearchTextMixin):
     """A published edition made of stories (books). Has its own cover and file, like a book."""
 
     class Status(models.TextChoices):
@@ -44,7 +77,7 @@ class Collection(models.Model):
         return self.title
 
 
-class Book(models.Model):
+class Book(SearchTextMixin):
     class Status(models.TextChoices):
         DRAFT = "draft", "Черновик"
         PUBLISHED = "published", "Опубликовано"

@@ -67,3 +67,17 @@ class CollectionDetailSerializer(CollectionSerializer):
         return CollectionBookSerializer(
             collection.published_books, many=True, context=self.context
         ).data
+
+
+class BookSearchSerializer(BookSerializer):
+    headline = serializers.CharField(read_only=True)
+
+    class Meta(BookSerializer.Meta):
+        fields = [*BookSerializer.Meta.fields, "headline"]
+
+
+class CollectionSearchSerializer(CollectionSerializer):
+    headline = serializers.CharField(read_only=True)
+
+    class Meta(CollectionSerializer.Meta):
+        fields = [*CollectionSerializer.Meta.fields, "headline"]

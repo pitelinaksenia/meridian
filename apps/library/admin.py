@@ -1,6 +1,24 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 
 from .models import Book, Collection
+
+
+@admin.action(description="Обновить текст для поиска")
+def refresh_search_text(modeladmin, request, queryset):
+    """Re-reads the files. Texts of new uploads are extracted on save, this is for old ones."""
+    empty = []
+    for item in queryset:
+        item.refresh_text()
+        if item.file and not item.text:
+            empty.append(str(item))
+    modeladmin.message_user(request, f"Текст обновлён: {queryset.count()}.")
+    if empty:
+        modeladmin.message_user(
+            request,
+            "Без текста — файл не читается или формат не поддерживается (аудио, epub, docx): "
+            + ", ".join(empty),
+            messages.WARNING,
+        )
 
 
 class CollectionBookInline(admin.TabularInline):
@@ -26,6 +44,7 @@ class CollectionAdmin(admin.ModelAdmin):
     list_editable = ["status", "order"]
     prepopulated_fields = {"slug": ("title",)}
     inlines = [CollectionBookInline]
+    actions = [refresh_search_text]
 
 
 @admin.register(Book)
@@ -38,3 +57,4 @@ class BookAdmin(admin.ModelAdmin):
     list_select_related = ["collection"]
     autocomplete_fields = ["collection"]
     prepopulated_fields = {"slug": ("title",)}
+    actions = [refresh_search_text]
