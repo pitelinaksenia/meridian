@@ -22,9 +22,9 @@ class PostListView(generics.ListAPIView):
         return Post.objects.filter(
             status=Post.Status.PUBLISHED,
             project__slug=self.kwargs["project_slug"],
-        )
+        ).prefetch_related("attachments")
 
 
 class PostDetailView(generics.RetrieveAPIView):
-    queryset = Post.objects.filter(status=Post.Status.PUBLISHED)
+    queryset = Post.objects.filter(status=Post.Status.PUBLISHED).prefetch_related("attachments")
     serializer_class = PostSerializer

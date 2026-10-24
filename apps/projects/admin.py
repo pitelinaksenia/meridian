@@ -12,6 +12,7 @@ class AttachmentInline(admin.TabularInline):
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
     list_display = ["title", "project", "status", "published_at"]
+    list_select_related = ["project"]
     list_filter = ["status", "project"]
     search_fields = ["title", "body"]
     inlines = [AttachmentInline]
