@@ -1,17 +1,34 @@
+import time
+
 from django.contrib import admin, messages
 
 from .models import Book, Collection
+
+# stay well below gunicorn's 30 s worker timeout: each file is read from S3
+ACTION_TIME_BUDGET = 20
 
 
 @admin.action(description="Обновить текст для поиска")
 def refresh_search_text(modeladmin, request, queryset):
     """Re-reads the files. Texts of new uploads are extracted on save, this is for old ones."""
-    empty = []
-    for item in queryset:
+    started = time.monotonic()
+    done, empty = 0, []
+    # those without text first: running the action again on everything continues from them
+    items = sorted(queryset, key=lambda item: bool(item.text))
+    for item in items:
+        if time.monotonic() - started > ACTION_TIME_BUDGET:
+            break
         item.refresh_text()
+        done += 1
         if item.file and not item.text:
             empty.append(str(item))
-    modeladmin.message_user(request, f"Текст обновлён: {queryset.count()}.")
+    modeladmin.message_user(request, f"Текст обновлён: {done}.")
+    if done < len(items):
+        modeladmin.message_user(
+            request,
+            f"Не успели {len(items) - done} — запустите действие ещё раз для тех же записей.",
+            messages.WARNING,
+        )
     if empty:
         modeladmin.message_user(
             request,

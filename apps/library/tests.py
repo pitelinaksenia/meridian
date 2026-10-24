@@ -1,5 +1,7 @@
 import tempfile
+from unittest import mock
 
+from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
@@ -134,6 +136,20 @@ class TextExtractionTest(TestCase):
         book.save()
         book.refresh_from_db()
         self.assertEqual(book.text, "второй")
+
+    def test_admin_action_continues_where_it_stopped(self):
+        books = [self.book(f"{i}.txt", f"текст {i}".encode()) for i in range(3)]
+        Book.objects.update(text="")
+        admin = User.objects.create_superuser("admin", "a@a.a", "x")
+        self.client.force_login(admin)
+        data = {"action": "refresh_search_text", "_selected_action": [b.pk for b in books]}
+        # the budget runs out after the first file
+        clock = mock.Mock(monotonic=mock.Mock(side_effect=[0, 0, 100]))
+        with mock.patch("apps.library.admin.time", clock):
+            self.client.post("/admin/library/book/", data)
+        self.assertEqual(Book.objects.exclude(text="").count(), 1)
+        self.client.post("/admin/library/book/", data)
+        self.assertEqual(Book.objects.exclude(text="").count(), 3)
 
 
 class LibrarySearchTest(TestCase):
