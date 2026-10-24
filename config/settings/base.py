@@ -67,6 +67,9 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
 }
+# Reuse DB connections between requests: opening a new one costs ~0.4 s per request in prod
+DATABASES["default"]["CONN_MAX_AGE"] = 60
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 
 AUTH_PASSWORD_VALIDATORS = [
