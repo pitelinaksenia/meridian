@@ -38,3 +38,28 @@ class PostQueriesTest(TestCase):
             response = self.client.get(f"/api/projects/posts/{post.id}/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["attachments"]), 1)
+
+
+class PostSearchTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        project = Project.objects.create(
+            title="Меридиан", slug="meridian", status=Project.Status.PUBLISHED
+        )
+        hidden = Project.objects.create(title="Скрытый", slug="hidden")
+        for title, proj, status in [
+            ("Съёмки на Иртыше", project, Post.Status.PUBLISHED),
+            ("Черновик про Иртыш", project, Post.Status.DRAFT),
+            ("Скрытый проект про Иртыш", hidden, Post.Status.PUBLISHED),
+        ]:
+            Post.objects.create(
+                project=proj, title=title, body="Снимали берег Иртыша", status=status
+            )
+
+    def test_finds_published_posts_of_published_projects(self):
+        response = self.client.get("/api/projects/search/", {"q": "иртыш"})
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertEqual([p["title"] for p in results], ["Съёмки на Иртыше"])
+        self.assertEqual(results[0]["project"]["slug"], "meridian")
+        self.assertIn("<mark>Иртыша</mark>", results[0]["headline"])

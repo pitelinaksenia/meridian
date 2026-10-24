@@ -5,6 +5,10 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from config.views import health_check
 
+admin.site.site_header = "Сайт Игоря Глушкова"
+admin.site.site_title = "Сайт Игоря Глушкова"
+admin.site.index_title = "Управление"
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/health/", health_check, name="health-check"),
