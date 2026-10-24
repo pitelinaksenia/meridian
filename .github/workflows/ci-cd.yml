@@ -56,22 +56,45 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-test
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    # A stuck push must fail the job, not hang for the default 6 hours
+    timeout-minutes: 25
+    env:
+      IMAGE: ${{ secrets.CLOUDRU_REGISTRY }}/meridian
 
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: imjasonh/setup-crane@v0.4
 
+      # Only crane talks to the registry. Docker and buildkit fetch the
+      # registry token with a POST to id.cloud.ru, which intermittently
+      # answers 502 from GitHub runners, and the push then hangs with no
+      # output. crane fetches the token with a GET and is not affected.
       - name: Log in to cloud.ru Artifact Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.CLOUDRU_REGISTRY }}
-          username: ${{ secrets.CLOUDRU_KEY_ID }}
-          password: ${{ secrets.CLOUDRU_KEY_SECRET }}
+        env:
+          REGISTRY: ${{ secrets.CLOUDRU_REGISTRY }}
+          KEY_ID: ${{ secrets.CLOUDRU_KEY_ID }}
+          KEY_SECRET: ${{ secrets.CLOUDRU_KEY_SECRET }}
+        run: echo "$KEY_SECRET" | crane auth login "$REGISTRY" -u "$KEY_ID" --password-stdin
 
-      - name: Build and push image
+      # Hence the image is built into a tarball, not pushed by buildkit
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: |
-            ${{ secrets.CLOUDRU_REGISTRY }}/meridian:latest
-            ${{ secrets.CLOUDRU_REGISTRY }}/meridian:${{ github.sha }}
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      # Blobs already in the registry are skipped, so a retry only
+      # uploads what the stalled attempt did not finish
+      - name: Push image
+        run: |
+          for attempt in 1 2 3; do
+            timeout 300 crane push /tmp/image.tar "$IMAGE:$GITHUB_SHA" && break
+            [ "$attempt" = 3 ] && { echo "::error::Push failed after 3 attempts"; exit 1; }
+            echo "::warning::Push attempt $attempt failed, retrying"
+          done
+          crane tag "$IMAGE:$GITHUB_SHA" latest
