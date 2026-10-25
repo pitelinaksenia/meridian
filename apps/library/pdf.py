@@ -11,9 +11,10 @@ MAX_GROWTH = 1.05
 GROWTH_ALLOWANCE = 64 * 1024
 
 
-def optimize_pdf(src: str, dst: str) -> bool:
+def optimize_pdf(src, src_size: int, dst: str) -> bool:
     """
-    Writes `src` to `dst` with small objects grouped into object streams.
+    Writes the PDF read from the seekable stream `src` (of `src_size` bytes) to the
+    file `dst`, with small objects grouped into object streams.
 
     The site reader (pdf.js) opens a PDF with range requests and, on open,
     reads the dictionary of every page. In a typical PDF those dictionaries
@@ -32,5 +33,4 @@ def optimize_pdf(src: str, dst: str) -> bool:
     except Exception:
         logger.exception("Could not repack PDF")
         return False
-    size = os.path.getsize(src)
-    return os.path.getsize(dst) <= max(size * MAX_GROWTH, size + GROWTH_ALLOWANCE)
+    return os.path.getsize(dst) <= max(src_size * MAX_GROWTH, src_size + GROWTH_ALLOWANCE)
