@@ -1,3 +1,5 @@
+import importlib
+import io
 import tempfile
 from unittest import mock
 
@@ -241,3 +243,52 @@ class LibrarySearchTest(TestCase):
 
     def test_empty_query(self):
         self.assertEqual(self.search("  "), {"books": [], "collections": []})
+
+
+class LowMemoryTest(TestCase):
+    """The prod container has 256 MB: these defaults of boto3/django-storages/pypdf cost 100+ MB."""
+
+    def test_pypdf_cache_is_dropped_between_pages(self):
+        import pypdf
+
+        from .text import pdf_text
+
+        writer = pypdf.PdfWriter()
+        for _ in range(3):
+            writer.add_page(pypdf.PdfReader(io.BytesIO(make_pdf("page"))).pages[0])
+        data = io.BytesIO()
+        writer.write(data)
+
+        readers = []
+
+        class Spy(pypdf.PdfReader):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                readers.append(self)
+
+        data.seek(0)
+        with mock.patch.object(pypdf, "PdfReader", Spy):
+            self.assertEqual(pdf_text(data).count("page"), 3)
+        self.assertEqual(readers[0].resolved_objects, {})
+
+        # without clearing, the reader keeps what it has read
+        data.seek(0)
+        reader = pypdf.PdfReader(data)
+        for page in reader.pages:
+            page.extract_text()
+        self.assertNotEqual(reader.resolved_objects, {})
+
+    def test_prod_s3_settings(self):
+        env = {
+            "SECRET_KEY": "x",
+            "ALLOWED_HOSTS": "x",
+            "S3_ACCESS_KEY_ID": "a",
+            "S3_SECRET_ACCESS_KEY": "b",
+            "S3_BUCKET": "c",
+        }
+        with mock.patch.dict("os.environ", env):
+            prod = importlib.import_module("config.settings.prod")
+        self.assertEqual(prod.AWS_S3_TRANSFER_CONFIG.max_in_memory_upload_chunks, 2)
+        self.assertEqual(prod.AWS_S3_TRANSFER_CONFIG.max_request_concurrency, 2)
+        # 0 would keep every file read from S3 in memory
+        self.assertGreater(prod.AWS_S3_MAX_MEMORY_SIZE, 0)

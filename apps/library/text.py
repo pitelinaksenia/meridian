@@ -50,40 +50,64 @@ def pdf_text(stream) -> str:
     """Text of a PDF from a seekable file: pypdf loads objects on demand, not the whole file."""
     from pypdf import PdfReader
 
+    reader = PdfReader(stream)
     parts, size = [], 0
-    for page in PdfReader(stream).pages:
+    for page in reader.pages:
         # scans have little or no text; images are not decoded by extract_text
         text = page.extract_text() or ""
         parts.append(text)
         size += len(text)
         if size >= MAX_TEXT_CHARS:
             break
+        # pypdf caches every object it has read, page images included: on a 126 MB scan
+        # that is +129 MB by the last page. Pages do not share text, so drop the cache
+        reader.resolved_objects.clear()
     return "\n".join(parts)
 
 
 CHUNK = 1024 * 1024
 
 
+def _drop_page_cache(f) -> None:
+    """
+    Flushes a temp file to disk and evicts it from the page cache.
+
+    The container's memory limit counts the page cache too, and dirty pages of a
+    fresh temp file cannot be evicted: with no swap, three copies of a 126 MB scan
+    (upload, download from S3, repacked) got a worker OOM-killed at 256 MB.
+    """
+    try:
+        fd = f.fileno()
+        os.fsync(fd)
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    except (AttributeError, OSError, ValueError):
+        pass  # not a real file, or no posix_fadvise (macOS)
+
+
 def _pdf_text_and_repack(field_file, f, repack: bool) -> str:
-    """Text of the PDF in `f`; with `repack`, also replaces the stored file by a repacked one."""
-    with tempfile.TemporaryDirectory() as tmp:
-        # a 200 MB scan must not sit in memory: copy it to disk in chunks
-        src = os.path.join(tmp, "src.pdf")
-        with open(src, "wb") as out:
-            shutil.copyfileobj(f, out, CHUNK)
-        path = src
-        if repack:
+    """
+    Text of the PDF in `f`; with `repack`, also replaces the stored file by a repacked one.
+
+    `f` is read in place, without a copy: from S3 it is already a temp file on disk
+    (AWS_S3_MAX_MEMORY_SIZE), and pypdf and pikepdf read objects on demand.
+    So a big file takes two copies on disk at most — the original and the repacked one.
+    """
+    # the S3 download has just been written to a temp file
+    _drop_page_cache(f)
+    text = pdf_text(f)
+    if repack:
+        with tempfile.TemporaryDirectory() as tmp:
             dst = os.path.join(tmp, "dst.pdf")
-            if optimize_pdf(src, dst):
+            f.seek(0)
+            if optimize_pdf(f, field_file.size, dst):
                 # same name, so the URL does not change; S3 replaces the object atomically
                 with (
-                    open(dst, "rb") as data,
+                    open(dst, "rb+") as data,
                     field_file.storage.open(field_file.name, "wb") as target,
                 ):
+                    _drop_page_cache(data)
                     shutil.copyfileobj(data, target, CHUNK)
-                path = dst
-        with open(path, "rb") as pdf:
-            return pdf_text(pdf)
+    return text
 
 
 def extract_text(field_file, repack_pdf: bool = False) -> str:
